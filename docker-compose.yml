@@ -1,0 +1,59 @@
+version: '3.8'
+
+# ==============================================================================
+# Docker Compose para Desarrollo y Pruebas Locales (Sin Swarm)
+# Uso: docker compose up -d
+# ==============================================================================
+
+services:
+  proxy:
+    image: nginx:1.27-alpine
+    container_name: snippet-searcher-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/errors:/usr/share/nginx/html/errors:ro
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    networks:
+      - backend
+    depends_on:
+      - ui
+      - snippet-service
+
+  ui:
+    image: ${UI_IMAGE:-ghcr.io/tp1-2-ingsis/printscript-ui:latest}
+    container_name: snippet-searcher-ui
+    networks:
+      - backend
+
+  snippet-service:
+    image: ${SNIPPET_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/snippet-service:latest}
+    container_name: snippet-searcher-snippet-service
+    networks:
+      - backend
+    depends_on:
+      - language-service
+      - permission-service
+
+  language-service:
+    image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
+    container_name: snippet-searcher-language-service
+    networks:
+      - backend
+
+  permission-service:
+    image: ${PERMISSION_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/permission-service:latest}
+    container_name: snippet-searcher-permission-service
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  certbot_conf:
+  certbot_www:
