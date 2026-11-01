@@ -1,7 +1,4 @@
 #!/bin/bash
-# ==============================================================================
-# Script para inicializar certificados TLS de Let's Encrypt con DuckDNS en la VM
-# ==============================================================================
 
 if [ -f .env ]; then
   export $(cat .env | grep -v '#' | awk '/=/ {print $1}')
@@ -47,3 +44,4 @@ if [ -n "$PROXY_CONTAINER" ]; then
 else
   echo "Stack desplegado. Verifica con: docker stack services snippet-searcher"
 fi
+
