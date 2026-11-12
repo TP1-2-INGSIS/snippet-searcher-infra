@@ -1,7 +1,8 @@
 #!/bin/bash
+set -e
 
 if [ -f .env ]; then
-  export $(cat .env | grep -v '#' | awk '/=/ {print $1}')
+  export $(grep -v '^#' .env | awk '/=/ {print $1}')
 fi
 
 if [ -z "$DOMAIN" ] || [ -z "$CERTBOT_EMAIL" ]; then
@@ -9,19 +10,12 @@ if [ -z "$DOMAIN" ] || [ -z "$CERTBOT_EMAIL" ]; then
   exit 1
 fi
 
-echo "=== 1. Creando certificados temporales para levantar Nginx ==="
-mkdir -p ./certbot/conf/live/$DOMAIN
-openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
-  -keyout ./certbot/conf/live/$DOMAIN/privkey.pem \
-  -out ./certbot/conf/live/$DOMAIN/fullchain.pem \
-  -subj "/CN=localhost"
+echo "=== 1. Asegurando que el stack esté desplegado en HTTP para el desafío ACME ==="
+git checkout -- ./nginx/conf.d/default.conf 2>/dev/null || true
+docker stack deploy --resolve-image=never -c docker-stack.yml snippet-searcher
 
-echo "=== 2. Levantando Nginx en el stack de Swarm ==="
-docker stack deploy -c docker-stack.yml snippet-searcher
-
-echo "=== 3. Solicitando certificado real a Let's Encrypt ==="
-# Esperar que Nginx esté listo
-sleep 10
+echo "=== 2. Solicitando certificado real a Let's Encrypt para $DOMAIN ==="
+sleep 5
 
 docker run --rm \
   -v snippet-searcher_certbot_conf:/etc/letsencrypt \
@@ -29,19 +23,20 @@ docker run --rm \
   certbot/certbot certonly \
   --webroot \
   -w /var/www/certbot \
-  -d $DOMAIN \
-  --email $CERTBOT_EMAIL \
+  -d "$DOMAIN" \
+  --email "$CERTBOT_EMAIL" \
   --rsa-key-size 4096 \
   --agree-tos \
-  --non-interactive \
-  --force-renewal
+  --non-interactive
 
-echo "=== 4. Recargando Nginx ==="
+echo "=== 3. Activando configuración HTTPS (TLS) en NGINX ==="
+envsubst '${DOMAIN}' < ./nginx/conf.d/ssl.conf.template > ./nginx/conf.d/default.conf
+
 PROXY_CONTAINER=$(docker ps -q -f name=snippet-searcher_proxy)
 if [ -n "$PROXY_CONTAINER" ]; then
-  docker exec $PROXY_CONTAINER nginx -s reload
-  echo "Certificado emitido y Nginx recargado con éxito para $DOMAIN."
+  docker exec "$PROXY_CONTAINER" nginx -s reload
+  echo "Certificado emitido y NGINX recargado con éxito en https://$DOMAIN"
 else
-  echo "Stack desplegado. Verifica con: docker stack services snippet-searcher"
+  echo "Error: No se encontró el contenedor snippet-searcher_proxy corriendo."
+  exit 1
 fi
-
