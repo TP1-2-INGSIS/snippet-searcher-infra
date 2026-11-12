@@ -36,6 +36,7 @@ services:
       DB_PASSWORD: "${SNIPPETS_DB_PASSWORD:-snippets}"
       LANGUAGE_SERVICE_URL: "http://language-service:8080"
       PERMISSION_SERVICE_URL: "http://permission-service:8080"
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
     depends_on:
@@ -53,6 +54,7 @@ services:
     environment:
       APP_MODE: "web"
       QUARKUS_REDIS_HOSTS: "redis://localhost:6379"
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
     restart: unless-stopped
@@ -65,6 +67,7 @@ services:
       DB_URL: "jdbc:postgresql://permissions-db:5432/permissions_db"
       DB_USERNAME: "${PERMISSIONS_DB_USER:-postgres}"
       DB_PASSWORD: "${PERMISSIONS_DB_PASSWORD:-postgres}"
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
     depends_on:
