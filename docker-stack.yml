@@ -58,6 +58,7 @@ services:
     image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
     environment:
       APP_MODE: "web"
+      QUARKUS_REDIS_HOSTS: "redis://localhost:6379"
     networks:
       - backend
     deploy:

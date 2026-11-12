@@ -52,6 +52,7 @@ services:
     container_name: snippet-searcher-language-service
     environment:
       APP_MODE: "web"
+      QUARKUS_REDIS_HOSTS: "redis://localhost:6379"
     networks:
       - backend
     restart: unless-stopped
