@@ -17,33 +17,95 @@ services:
     depends_on:
       - ui
       - snippet-service
+    restart: unless-stopped
 
   ui:
     image: ${UI_IMAGE:-ghcr.io/tp1-2-ingsis/printscript-ui:latest}
     container_name: snippet-searcher-ui
     networks:
       - backend
+    restart: unless-stopped
 
   snippet-service:
     image: ${SNIPPET_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/snippet-service:latest}
     container_name: snippet-searcher-snippet-service
+    environment:
+      PORT: "8080"
+      DB_URL: "jdbc:postgresql://snippets-db:5432/snippets"
+      DB_USER: "${SNIPPETS_DB_USER:-snippets}"
+      DB_PASSWORD: "${SNIPPETS_DB_PASSWORD:-snippets}"
+      LANGUAGE_SERVICE_URL: "http://language-service:8080"
+      PERMISSION_SERVICE_URL: "http://permission-service:8080"
     networks:
       - backend
     depends_on:
-      - language-service
-      - permission-service
+      snippets-db:
+        condition: service_healthy
+      language-service:
+        condition: service_started
+      permission-service:
+        condition: service_started
+    restart: unless-stopped
 
   language-service:
     image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
     container_name: snippet-searcher-language-service
+    environment:
+      APP_MODE: "web"
     networks:
       - backend
+    restart: unless-stopped
 
   permission-service:
     image: ${PERMISSION_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/permission-service:latest}
     container_name: snippet-searcher-permission-service
+    environment:
+      PORT: "8080"
+      DB_URL: "jdbc:postgresql://permissions-db:5432/permissions_db"
+      DB_USERNAME: "${PERMISSIONS_DB_USER:-postgres}"
+      DB_PASSWORD: "${PERMISSIONS_DB_PASSWORD:-postgres}"
     networks:
       - backend
+    depends_on:
+      permissions-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  snippets-db:
+    image: postgres:16-alpine
+    container_name: snippet-searcher-snippets-db
+    environment:
+      POSTGRES_DB: "snippets"
+      POSTGRES_USER: "${SNIPPETS_DB_USER:-snippets}"
+      POSTGRES_PASSWORD: "${SNIPPETS_DB_PASSWORD:-snippets}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SNIPPETS_DB_USER:-snippets} -d snippets"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - snippets_db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    restart: unless-stopped
+
+  permissions-db:
+    image: postgres:16-alpine
+    container_name: snippet-searcher-permissions-db
+    environment:
+      POSTGRES_DB: "permissions_db"
+      POSTGRES_USER: "${PERMISSIONS_DB_USER:-postgres}"
+      POSTGRES_PASSWORD: "${PERMISSIONS_DB_PASSWORD:-postgres}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PERMISSIONS_DB_USER:-postgres} -d permissions_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - permissions_db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    restart: unless-stopped
 
 networks:
   backend:
@@ -52,4 +114,5 @@ networks:
 volumes:
   certbot_conf:
   certbot_www:
-
+  snippets_db_data:
+  permissions_db_data:

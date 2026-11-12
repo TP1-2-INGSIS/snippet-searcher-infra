@@ -27,7 +27,7 @@ services:
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
   ui:
     image: ${UI_IMAGE:-ghcr.io/tp1-2-ingsis/printscript-ui:latest}
@@ -36,45 +36,78 @@ services:
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
   snippet-service:
     image: ${SNIPPET_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/snippet-service:latest}
+    environment:
+      PORT: "8080"
+      DB_URL: "jdbc:postgresql://snippets-db:5432/snippets"
+      DB_USER: "${SNIPPETS_DB_USER:-snippets}"
+      DB_PASSWORD: "${SNIPPETS_DB_PASSWORD:-snippets}"
+      LANGUAGE_SERVICE_URL: "http://language-service:8080"
+      PERMISSION_SERVICE_URL: "http://permission-service:8080"
     networks:
       - backend
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
   language-service:
     image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
+    environment:
+      APP_MODE: "web"
     networks:
       - backend
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
   permission-service:
     image: ${PERMISSION_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/permission-service:latest}
+    environment:
+      PORT: "8080"
+      DB_URL: "jdbc:postgresql://permissions-db:5432/permissions_db"
+      DB_USERNAME: "${PERMISSIONS_DB_USER:-postgres}"
+      DB_PASSWORD: "${PERMISSIONS_DB_PASSWORD:-postgres}"
     networks:
       - backend
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
 
-  certbot:
-    image: certbot/certbot:latest
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+  snippets-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "snippets"
+      POSTGRES_USER: "${SNIPPETS_DB_USER:-snippets}"
+      POSTGRES_PASSWORD: "${SNIPPETS_DB_PASSWORD:-snippets}"
     volumes:
-      - certbot_conf:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
+      - snippets_db_data:/var/lib/postgresql/data
+    networks:
+      - backend
     deploy:
       replicas: 1
       restart_policy:
-        condition: on-failure
+        condition: any
+
+  permissions-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "permissions_db"
+      POSTGRES_USER: "${PERMISSIONS_DB_USER:-postgres}"
+      POSTGRES_PASSWORD: "${PERMISSIONS_DB_PASSWORD:-postgres}"
+    volumes:
+      - permissions_db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
 
 networks:
   backend:
@@ -83,6 +116,8 @@ networks:
 volumes:
   certbot_conf:
   certbot_www:
+  snippets_db_data:
+  permissions_db_data:
 
 configs:
   proxy_conf:
@@ -94,4 +129,3 @@ configs:
   error502_page:
     name: "snippet_searcher_error502_v1"
     file: ./nginx/errors/502.html
-
