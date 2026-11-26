@@ -127,6 +127,22 @@ El procesamiento asíncrono (lint/format masivo al cambiar reglas, US12/US15) us
 - **Orden de despliegue:** Redis primero y workers después. En compose se garantiza con `depends_on` + healthcheck. En Swarm `depends_on` se ignora: los workers reintentan hasta que Redis responde (`restart_policy: any`); si es la primera vez, conviene `docker service scale snippet-searcher_language-worker=0` antes y volver a 2 cuando `snippet-searcher_redis` esté `1/1`.
 - Inspeccionar los streams: `docker compose exec redis redis-cli XINFO GROUPS tasks:printscript`.
 
+### Assets, assets-db y Azurite
+
+El contenido de los snippets vive en **Assets** (blobs en Azure Blob Storage). Servicios nuevos, todos solo en la red interna (sin puertos publicados):
+
+| Servicio | Detalle |
+|---|---|
+| `assets-service` | Imagen `ASSETS_SERVICE_IMAGE` (`:dev` en dev, `:latest` en prod). Escucha en el puerto 8080. Memoria 512M con `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`. El CD del repo Assets despliega `snippet-searcher_assets-service`. |
+| `assets-db` | `postgres:16-alpine`, volumen `assets_db_data` (tmpfs en e2e). Credenciales `ASSETS_DB_USER` / `ASSETS_DB_PASSWORD`. |
+| `azurite` | `mcr.microsoft.com/azure-storage/azurite:3.34.0`, solo servicio blob (puerto 10000), volumen `azurite_data`, 256M. Siempre presente en el stack. |
+
+- Variables de `assets-service` (los nombres que lee la app): `SPRING_PROFILES_ACTIVE`, `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_STORAGE_CONTAINER`.
+- `snippet-service` recibe `ASSETS_SERVICE_URL=http://assets-service:8080` (lo consumira SNIP-4) y `SNIPPET_STORAGE=assets`, que elige donde guarda el contenido (`assets` o `database`; el default de la app es `database`). Las imagenes viejas de Snippets ignoran ambas variables.
+- **Dev y e2e:** `AZURE_STORAGE_CONNECTION_STRING` apunta al host `azurite` (en `.env.dev.example` hay un comentario con la forma de armarla con la cuenta publica de desarrollo de Azurite). El e2e usa una cuenta descartable propia, definida en `docker-compose.e2e.yml`.
+- **Prod:** `AZURE_STORAGE_CONNECTION_STRING` en el `.env` de la VM es la de la cuenta real de Azure (paso manual **M7**: crear el storage account y el container, y copiar la connection string desde las Access keys). Assets crea el container si no existe, pero conviene crearlo antes con el mismo nombre que `AZURE_STORAGE_CONTAINER` (`snippets`). En prod `azurite` queda levantado sin uso.
+- El smoke e2e todavia no ejercita Assets: solo se verifica que el stack levanta.
+
 ---
 
 ### Opción B: Despliegue en Docker Swarm (VM dev / prod)

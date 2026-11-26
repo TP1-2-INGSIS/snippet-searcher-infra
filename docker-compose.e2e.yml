@@ -28,6 +28,8 @@ services:
       PERMISSION_SERVICE_URL: "http://permission-service:8080"
       AUTH_HEADER_IDENTITY_ENABLED: "true"
       REDIS_URL: "redis://redis:6379"
+      ASSETS_SERVICE_URL: "http://assets-service:8080"
+      SNIPPET_STORAGE: "assets"
     networks:
       - e2e-backend
     depends_on:
@@ -87,6 +89,50 @@ services:
     depends_on:
       permissions-db:
         condition: service_healthy
+
+  # Assets no se ejercita todavia en el smoke test (lo hara SNIP-4); solo debe levantar.
+  assets-service:
+    image: ${ASSETS_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/assets:latest}
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://assets-db:5432/assets"
+      SPRING_DATASOURCE_USERNAME: "assets"
+      SPRING_DATASOURCE_PASSWORD: "assets"
+      # Cuenta descartable de Azurite (ver AZURITE_ACCOUNTS en el servicio azurite); clave de prueba, no es un secreto.
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=e2eaccount;AccountKey=ZTJlLWR1bW15LWtleS0wMTIzNDU2Nzg5;BlobEndpoint=http://azurite:10000/e2eaccount;"
+      AZURE_STORAGE_CONTAINER: "snippets"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+    networks:
+      - e2e-backend
+    depends_on:
+      assets-db:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+
+  assets-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "assets"
+      POSTGRES_USER: "assets"
+      POSTGRES_PASSWORD: "assets"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assets -d assets"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - e2e-backend
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.34.0
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--loose", "--skipApiVersionCheck", "--inMemoryPersistence"]
+    environment:
+      AZURITE_ACCOUNTS: "e2eaccount:ZTJlLWR1bW15LWtleS0wMTIzNDU2Nzg5"
+    networks:
+      - e2e-backend
 
   snippets-db:
     image: postgres:16-alpine

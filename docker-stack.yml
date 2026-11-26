@@ -69,6 +69,8 @@ services:
       AUTH0_AUDIENCE: "${AUTH0_AUDIENCE:-}"
       AUTH_HEADER_IDENTITY_ENABLED: "false"
       REDIS_URL: "redis://redis:6379"
+      ASSETS_SERVICE_URL: "http://assets-service:8080"
+      SNIPPET_STORAGE: "assets"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
@@ -148,6 +150,60 @@ services:
       restart_policy:
         condition: any
 
+  assets-service:
+    image: ${ASSETS_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/assets:latest}
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://assets-db:5432/assets"
+      SPRING_DATASOURCE_USERNAME: "${ASSETS_DB_USER:-assets}"
+      SPRING_DATASOURCE_PASSWORD: "${ASSETS_DB_PASSWORD:-assets}"
+      # Prod: cuenta real de Azure. Dev: apunta al servicio azurite (ver README).
+      AZURE_STORAGE_CONNECTION_STRING: "${AZURE_STORAGE_CONNECTION_STRING:-}"
+      AZURE_STORAGE_CONTAINER: "${AZURE_STORAGE_CONTAINER:-snippets}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+      restart_policy:
+        condition: any
+
+  assets-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "assets"
+      POSTGRES_USER: "${ASSETS_DB_USER:-assets}"
+      POSTGRES_PASSWORD: "${ASSETS_DB_PASSWORD:-assets}"
+    volumes:
+      - assets_db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  # Emulador de Azure Blob. Siempre presente; en prod queda sin uso porque
+  # AZURE_STORAGE_CONNECTION_STRING apunta a la cuenta real de Azure.
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.34.0
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--loose", "--skipApiVersionCheck", "--location", "/data"]
+    volumes:
+      - azurite_data:/data
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
+      restart_policy:
+        condition: any
+
   snippets-db:
     image: postgres:16-alpine
     environment:
@@ -188,6 +244,8 @@ volumes:
   snippets_db_data:
   permissions_db_data:
   redis_data:
+  assets_db_data:
+  azurite_data:
 
 configs:
   error404_page:
