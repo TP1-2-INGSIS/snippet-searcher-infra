@@ -77,7 +77,7 @@ snippet-searcher-infra/
 ├── .env.prod.example            # Plantilla del .env de la VM de prod (tags :latest)
 ├── .github/workflows/
 │   ├── deploy.yml               # CD: push a dev/main -> docker stack deploy por SSH
-│   └── e2e.yml                  # Smoke tests (PRs a main y dev)
+│   └── e2e.yml                  # E2E completo (PRs a main y dev)
 └── README.md
 ```
 
@@ -148,7 +148,7 @@ El contenido de los snippets vive en **Assets** (blobs en Azure Blob Storage). S
 - `snippet-service` recibe `ASSETS_SERVICE_URL=http://assets-service:8080` (lo consumira SNIP-4) y `SNIPPET_STORAGE=assets`, que elige donde guarda el contenido (`assets` o `database`; el default de la app es `database`). Las imagenes viejas de Snippets ignoran ambas variables.
 - **Dev y e2e:** `AZURE_STORAGE_CONNECTION_STRING` apunta al host `azurite` (en `.env.dev.example` hay un comentario con la forma de armarla con la cuenta publica de desarrollo de Azurite). El e2e usa una cuenta descartable propia, definida en `docker-compose.e2e.yml`.
 - **Prod:** `AZURE_STORAGE_CONNECTION_STRING` en el `.env` de la VM es la de la cuenta real de Azure (paso manual **M7**: crear el storage account y el container, y copiar la connection string desde las Access keys). Assets crea el container si no existe, pero conviene crearlo antes con el mismo nombre que `AZURE_STORAGE_CONTAINER` (`snippets`). En prod `azurite` queda levantado sin uso.
-- El smoke e2e todavia no ejercita Assets: solo se verifica que el stack levanta.
+- El smoke e2e ejercita Assets de forma indirecta: con `SNIPPET_STORAGE=assets` crear, leer y descargar snippets pasa por Assets/Azurite.
 
 ---
 
@@ -261,3 +261,23 @@ Repetir los pasos 1 a 6 para la VM de dev y para la de prod.
     docker run --rm -v snippet-searcher_certbot_conf:/etc/letsencrypt certbot/certbot certificates
     ./scripts/e2e-smoke-test.sh https://<dominio>   # opcional, si el ambiente lo soporta
     ```
+
+
+---
+
+## Cobertura del e2e
+
+`scripts/e2e-smoke-test.sh` (22 pasos, corre en `.github/workflows/e2e.yml` contra el stack de `docker-compose.e2e.yml` con imagenes `:latest`) cubre: UI y proxy, lenguajes, CRUD de snippets, listado y detalle, descarga, compartir y permisos (404/403/409), tests de snippets y su ejecucion, reglas de lint y formato, y los flujos nuevos:
+
+* **Formato a demanda:** `POST /api/snippets/format` (200 con `content`; 422 con violaciones).
+* **Validacion real:** crear un snippet invalido devuelve 422 con `rule`/`line`/`column`.
+* **Reglas asincronas:** `PUT /api/rules/printscript/lint` responde 202 con `queued >= 1` y el script hace polling (hasta 60 s) de `lintStatus` hasta `COMPLIANT`/`NON_COMPLIANT`: prueba el viaje por Redis y el worker.
+* **Descarga:** el original es identico a lo subido (y no cambia tras bajar el formateado).
+* **Ejecucion interactiva:** `scripts/e2e-ws-check.py` (requiere `pip install websockets`) abre `/api/snippets/{id}/run?userId=...`, espera `input-request`, manda el input, verifica `output`, `finished` y cierre 1000; un usuario sin acceso debe recibir handshake rechazado o cierre 1008.
+* **Revalidacion:** `POST /api/snippets/revalidate` responde 202 `{queued}` y los estados se vuelven a resolver.
+
+El workflow espera a que `redis`, `language-worker`, `assets-service` y `azurite` esten corriendo antes del smoke test.
+
+## Logs de nginx
+
+El `access_log` usa el formato `noquery` (`$request_method $path_noquery $server_protocol`), sin query string, porque el WebSocket lleva `?access_token=<JWT>`. Limitacion: el `error_log` de nginx (p. ej. un 502 del upstream) si incluye la request completa.

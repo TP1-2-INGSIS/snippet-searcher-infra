@@ -50,6 +50,16 @@ jobs:
         if: ${{ inputs.target_url == '' }}
         run: |
           docker compose -f docker-compose.e2e.yml up -d
+          echo "Waiting for redis, language-worker and assets-service to be running..."
+          for i in $(seq 1 60); do
+            RUNNING=$(docker compose -f docker-compose.e2e.yml ps --status running --services)
+            if echo "${RUNNING}" | grep -qx redis && echo "${RUNNING}" | grep -qx language-worker \
+              && echo "${RUNNING}" | grep -qx assets-service && echo "${RUNNING}" | grep -qx azurite; then
+              echo "Redis, worker, Assets and Azurite up after ${i} attempts"
+              break
+            fi
+            sleep 3
+          done
           echo "Waiting for gateway & all services to become ready..."
           for i in $(seq 1 60); do
             if curl -fsS -H "X-User-Id: e2e-warmup" http://localhost:18080/api/languages | grep -q "printscript"; then
@@ -62,7 +72,10 @@ jobs:
           docker compose -f docker-compose.e2e.yml logs --tail=80
           exit 1
 
-      - name: Run 14-step multi-service E2E suite
+      - name: Install WebSocket check dependency
+        run: python3 -m pip install --quiet websockets
+
+      - name: Run 22-step multi-service E2E suite
         env:
           TARGET_URL: ${{ inputs.target_url != '' && inputs.target_url || 'http://localhost:18080' }}
         run: ./scripts/e2e-smoke-test.sh "${TARGET_URL}"
