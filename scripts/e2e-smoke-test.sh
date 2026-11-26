@@ -307,7 +307,7 @@ py_assert "$(cat "${INV_FILE}")" "
 d = data.get('details')
 assert isinstance(d, list) and len(d) > 0, f'Expected details: {data}'
 for k in ('rule', 'line', 'column'):
-    assert k in d[0], f'Missing {k} in violation {d[0]}'
+    assert d[0].get(k) is not None, f'Missing/null {k} in violation {d[0]}'
 "
 rm -f "${INV_FILE}"
 echo "PASS (422 with rule/line/column)"
@@ -361,7 +361,7 @@ RUN_SNIPPET=$(curl -fsS -X POST \
   "${BASE_URL}/api/snippets")
 RUN_SNIPPET_ID=$(py_assert "${RUN_SNIPPET}" "print(data['id'])")
 RUN_SNIPPET_ID_TO_DELETE="${RUN_SNIPPET_ID}"
-python3 "$(dirname "${BASH_SOURCE[0]}")/e2e-ws-check.py" "${BASE_URL}" "${RUN_SNIPPET_ID}" "${USER_A}" "e2e-stranger-${RUN_ID}"
+timeout 150 python3 "$(dirname "${BASH_SOURCE[0]}")/e2e-ws-check.py" "${BASE_URL}" "${RUN_SNIPPET_ID}" "${USER_A}" "e2e-stranger-${RUN_ID}"
 curl -sS -o /dev/null -X DELETE -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${RUN_SNIPPET_ID}" || true
 RUN_SNIPPET_ID_TO_DELETE=""
 echo "PASS (owner run + unauthorized rejected)"

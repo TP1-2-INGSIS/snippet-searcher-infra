@@ -280,4 +280,4 @@ El workflow espera a que `redis`, `language-worker`, `assets-service` y `azurite
 
 ## Logs de nginx
 
-El `access_log` usa el formato `noquery` (`$request_method $path_noquery $server_protocol`), sin query string, porque el WebSocket lleva `?access_token=<JWT>`. Limitacion: el `error_log` de nginx (p. ej. un 502 del upstream) si incluye la request completa.
+El `access_log` usa el formato `noquery` (`$request_method $path_noquery $server_protocol`), sin query string, porque el WebSocket lleva `?access_token=<JWT>`. El `error_log` esta en nivel `crit`: los errores de upstream (502, etc.) se loguean en nivel `error` con la request completa (incluido `?access_token=`), asi que no se escriben. Contrapartida: esos fallos siguen visibles por los codigos de estado del access log y por los logs propios de los servicios.

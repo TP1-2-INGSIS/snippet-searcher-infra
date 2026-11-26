@@ -20,6 +20,8 @@ server {
     listen 80;
     server_name ${DOMAIN};
     access_log /var/log/nginx/access.log noquery;
+    # crit: los errores de upstream (nivel error) loguean la request completa con ?access_token=<JWT>.
+    error_log /var/log/nginx/error.log crit;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -35,6 +37,8 @@ server {
     listen 443 ssl;
     server_name ${DOMAIN};
     access_log /var/log/nginx/access.log noquery;
+    # crit: los errores de upstream (nivel error) loguean la request completa con ?access_token=<JWT>.
+    error_log /var/log/nginx/error.log crit;
 
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;

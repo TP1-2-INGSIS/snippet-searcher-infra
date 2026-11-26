@@ -56,10 +56,17 @@ jobs:
             if echo "${RUNNING}" | grep -qx redis && echo "${RUNNING}" | grep -qx language-worker \
               && echo "${RUNNING}" | grep -qx assets-service && echo "${RUNNING}" | grep -qx azurite; then
               echo "Redis, worker, Assets and Azurite up after ${i} attempts"
+              READY=1
               break
             fi
             sleep 3
           done
+          if [ "${READY:-0}" != "1" ]; then
+            echo "Timed out waiting for redis, language-worker, assets-service and azurite"
+            docker compose -f docker-compose.e2e.yml ps
+            docker compose -f docker-compose.e2e.yml logs --tail=80
+            exit 1
+          fi
           echo "Waiting for gateway & all services to become ready..."
           for i in $(seq 1 60); do
             if curl -fsS -H "X-User-Id: e2e-warmup" http://localhost:18080/api/languages | grep -q "printscript"; then
@@ -73,7 +80,7 @@ jobs:
           exit 1
 
       - name: Install WebSocket check dependency
-        run: python3 -m pip install --quiet websockets
+        run: python3 -m pip install --quiet websockets==17.4
 
       - name: Run 22-step multi-service E2E suite
         env:
