@@ -54,15 +54,24 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
+      # Host key: si existe el secret opcional DEPLOY_KNOWN_HOSTS (salida de `ssh-keyscan <host>`)
+      # se usa para fijarla (recomendado). Si no, se cae a ssh-keyscan, que es vulnerable a MITM
+      # en la primera conexion, y se emite un warning visible.
       - name: Configure SSH
         if: steps.target.outputs.enabled == 'true'
         env:
           HOST: ${{ steps.target.outputs.host }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning title=Host key sin fijar::DEPLOY_KNOWN_HOSTS no esta definido; se usa ssh-keyscan (inseguro ante MITM)."
+            ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          fi
 
       - name: Update stack files and deploy
         if: steps.target.outputs.enabled == 'true'
@@ -70,17 +79,28 @@ jobs:
           HOST: ${{ steps.target.outputs.host }}
           BRANCH: ${{ steps.target.outputs.branch }}
         run: |
-          ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes "$DEPLOY_USER@$HOST" \
-            "BRANCH='$BRANCH' bash -s" <<'REMOTE'
+          ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$DEPLOY_USER@$HOST" "BRANCH='$BRANCH' bash -s" <<'REMOTE'
           set -euo pipefail
           cd ~/snippet-searcher-infra
           git fetch origin "$BRANCH"
-          git checkout "$BRANCH"
-          git reset --hard "origin/$BRANCH"
-          # El .env vive solo en la VM
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          # El .env vive solo en la VM; valores entre comillas simples (ver README)
           set -a; . ./.env; set +a
           docker stack deploy -c docker-stack.yml --with-registry-auth snippet-searcher
+
+          echo "Esperando convergencia de los servicios (max ~3 min)..."
+          for _ in $(seq 1 36); do
+            bad=$(docker stack services snippet-searcher --format '{{.Name}} {{.Replicas}}' \
+              | awk '{split($2, r, "/"); if (r[1] != r[2]) print $1 " " $2}')
+            [ -z "$bad" ] && break
+            sleep 5
+          done
           docker stack services snippet-searcher
+          if [ -n "$bad" ]; then
+            echo "Servicios sin converger:"; echo "$bad"
+            exit 1
+          fi
           REMOTE
 
       - name: Summary

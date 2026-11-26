@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   proxy:
     image: nginx:1.27-alpine
@@ -35,7 +33,7 @@ services:
 
   # Renueva los certificados Let's Encrypt (webroot compartido con nginx).
   certbot:
-    image: certbot/certbot:latest
+    image: certbot/certbot:v5.10.0
     entrypoint: ["/bin/sh", "-c"]
     command:
       - "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
