@@ -117,7 +117,7 @@ El procesamiento asíncrono (lint/format masivo al cambiar reglas, US12/US15) us
 - `REDIS_URL=redis://redis:6379` en `snippet-service`, `language-service` y `language-worker`.
 - Variables opcionales de Language: `REDIS_STREAM_TASKS`, `REDIS_STREAM_RESULTS`, `REDIS_STREAM_GROUP`, `REDIS_STREAM_CONSUMER`.
 - **Consumer name:** en el stack, `REDIS_STREAM_CONSUMER=worker-{{.Task.Slot}}` (Swarm expande la plantilla en `environment` al crear cada tarea), así cada réplica tiene un nombre único (`worker-1`, `worker-2`). En compose/e2e es `worker-1`.
-- **Memoria (stack):** redis 256M, worker 512M con `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75` para que la JVM respete el límite.
+- **Memoria (stack):** redis 256M (con `--maxmemory 200mb`, así rechaza escrituras en vez de morir por OOM), worker 768M con `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75` para que la JVM respete el límite.
 - **Orden de despliegue:** Redis primero y workers después. En compose se garantiza con `depends_on` + healthcheck. En Swarm `depends_on` se ignora: los workers reintentan hasta que Redis responde (`restart_policy: any`); si es la primera vez, conviene `docker service scale snippet-searcher_language-worker=0` antes y volver a 2 cuando `snippet-searcher_redis` esté `1/1`.
 - Inspeccionar los streams: `docker compose exec redis redis-cli XINFO GROUPS tasks:printscript`.
 

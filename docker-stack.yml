@@ -86,13 +86,13 @@ services:
       replicas: 2
       resources:
         limits:
-          memory: 512M
+          memory: 768M
       restart_policy:
         condition: any
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "noeviction"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
