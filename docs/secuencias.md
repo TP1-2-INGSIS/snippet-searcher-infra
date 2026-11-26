@@ -83,9 +83,7 @@ sequenceDiagram
 
 ## (c) Aplicar reglas de forma asíncrona (lint y formato)
 
-Estado: en implementación (Snippets PR #20). Los workers de Language ya están en `main`.
-
-`PUT /snippets/rules/{language}/lint` (o `/format`) guarda las reglas, deja una fila de estado por snippet y publica una tarea por snippet. Responde 202 sin esperar. Los workers de Language procesan y publican resultados; Snippets los consume y actualiza el estado. La UI consulta el listado y ve `pending` hasta que llega el resultado.
+`PUT /rules/{language}/lint` (o `/format`) guarda las reglas, deja una fila de estado por snippet y publica una tarea por snippet. Responde 202 sin esperar. Los workers de Language procesan y publican resultados; Snippets los consume y actualiza el estado. La UI consulta el listado y ve `pending` hasta que llega el resultado.
 
 ```mermaid
 sequenceDiagram
@@ -138,8 +136,6 @@ sequenceDiagram
 El proceso es tolerante a fallos: un snippet que falla tres veces queda en `FAILED` y el resto sigue, así que no se frena el lote. Si el contenido cambió mientras la tarea estaba en vuelo, el `contentHash` no coincide y el resultado se descarta.
 
 ## (d) Ejecución interactiva por WebSocket
-
-Estado: en implementación (Snippets PR #22). El lado de Language (`/languages/{language}/run`) ya está en `main`.
 
 La UI abre un WebSocket contra Snippets, que valida el token y el permiso y abre otro hacia Language. Snippets reenvía los mensajes en ambos sentidos. El intérprete se queda esperando cuando pide un input y cada `println` se manda al instante.
 
