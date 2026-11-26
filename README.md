@@ -4,6 +4,13 @@ Repositorio central de orquestación, infraestructura de red y proxy reverso (In
 
 ---
 
+## Documentación
+
+- [Arquitectura](docs/arquitectura.md): diagrama de componentes y despliegue.
+- [Diagramas de secuencia](docs/secuencias.md): los flujos principales.
+- [User stories](docs/user-stories.md): las 16 US y cómo las cubre el sistema.
+- [Decisiones de diseño](docs/decisiones.md): ADR.
+
 ## 1. Arquitectura de Red y Topología de Servicios
 
 Siguiendo las pautas de las **Clases 05 (Docker Swarm)**, **06 (HTTPS)** y **07 (Reverse Proxy)**:
