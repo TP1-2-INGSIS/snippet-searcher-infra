@@ -7,8 +7,12 @@ RUN_ID="$(date +%s)-$$"
 USER_A="${2:-e2e-owner-${RUN_ID}}"
 USER_B="${3:-e2e-reader-${RUN_ID}}"
 SNIPPET_ID=""
+RUN_SNIPPET_ID_TO_DELETE=""
 
 cleanup() {
+  if [[ -n "${RUN_SNIPPET_ID_TO_DELETE}" ]]; then
+    curl -sS -o /dev/null -X DELETE -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${RUN_SNIPPET_ID_TO_DELETE}" || true
+  fi
   if [[ -n "${SNIPPET_ID}" ]]; then
     curl -sS -o /dev/null -X DELETE \
       -H "X-User-Id: ${USER_A}" \
@@ -48,7 +52,7 @@ http_status() {
 echo "Running full multi-service E2E suite against ${BASE_URL}"
 echo "Owner=${USER_A} | Reader=${USER_B}"
 
-echo "==> [1/14] UI & reverse proxy (GET /)"
+echo "==> [1/22] UI & reverse proxy (GET /)"
 UI_BODY_FILE="$(mktemp)"
 UI_STATUS=$(curl -sS -o "${UI_BODY_FILE}" -w "%{http_code}" "${BASE_URL}/")
 if [[ "${UI_STATUS}" != "200" ]] || ! grep -qi "<html" "${UI_BODY_FILE}"; then
@@ -59,7 +63,7 @@ fi
 rm -f "${UI_BODY_FILE}"
 echo "OK (HTTP 200 HTML)"
 
-echo "==> [2/14] Language service via Snippets (GET /api/languages)"
+echo "==> [2/22] Language service via Snippets (GET /api/languages)"
 LANGS=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/languages")
 py_assert "${LANGS}" "
 assert isinstance(data, list) and len(data) > 0, 'Expected non-empty languages list'
@@ -69,7 +73,7 @@ assert isinstance(ps.get('versions'), list) and len(ps['versions']) > 0, f'Inval
 "
 echo "OK (printscript schema verified)"
 
-echo "==> [3/14] Validation error handling (POST /api/snippets blank name -> 400)"
+echo "==> [3/22] Validation error handling (POST /api/snippets blank name -> 400)"
 BAD_STATUS=$(http_status POST "${USER_A}" "${BASE_URL}/api/snippets" \
   '{"name":"","language":"printscript","version":"1.1","content":"let x: number = 1;"}')
 if [[ "${BAD_STATUS}" != "400" ]]; then
@@ -78,7 +82,7 @@ if [[ "${BAD_STATUS}" != "400" ]]; then
 fi
 echo "OK (HTTP 400)"
 
-echo "==> [4/14] Create snippet + UI Zod Detail schema (POST /api/snippets)"
+echo "==> [4/22] Create snippet + UI Zod Detail schema (POST /api/snippets)"
 CREATE_PAYLOAD='{"name":"e2e-smoke","description":"smoke test","language":"printscript","version":"1.1","content":"let x: number = 1;\nprintln(x);"}'
 CREATED=$(curl -fsS -X POST \
   -H "Content-Type: application/json" \
@@ -95,7 +99,7 @@ print(data['id'])
 ")
 echo "OK (id=${SNIPPET_ID})"
 
-echo "==> [5/14] List & detail (GET /api/snippets?relation=OWNED & GET /api/snippets/{id})"
+echo "==> [5/22] List & detail (GET /api/snippets?relation=OWNED & GET /api/snippets/{id})"
 LIST_OWNED=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets?relation=OWNED")
 py_assert "${LIST_OWNED}" "
 for field in ('items', 'page', 'size', 'total'):
@@ -111,7 +115,7 @@ assert data['id'] == '${SNIPPET_ID}'
 "
 echo "OK"
 
-echo "==> [6/14] Update snippet (PUT /api/snippets/{id})"
+echo "==> [6/22] Update snippet (PUT /api/snippets/{id})"
 UPDATE_PAYLOAD='{"name":"e2e-smoke-updated","description":"smoke test updated","language":"printscript","version":"1.1","content":"let x: number = 42;\nprintln(x);"}'
 UPDATED=$(curl -fsS -X PUT \
   -H "Content-Type: application/json" \
@@ -125,7 +129,7 @@ assert isinstance(data.get('updatedAt'), str) and len(data['updatedAt']) > 0
 "
 echo "OK"
 
-echo "==> [7/14] Download raw & formatted via Language (GET /api/snippets/{id}/download)"
+echo "==> [7/22] Download raw & formatted via Language (GET /api/snippets/{id}/download)"
 DL_HEADERS="$(mktemp)"
 DL_BODY=$(curl -fsS -D "${DL_HEADERS}" -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}/download")
 if ! grep -qi 'content-disposition:.*attachment.*\.ps' "${DL_HEADERS}" || [[ "${DL_BODY}" != *"println(x);"* ]]; then
@@ -141,7 +145,7 @@ if [[ "${DL_FMT}" != *"println(x);"* ]]; then
 fi
 echo "OK"
 
-echo "==> [8/14] Permissions user directory & unauthorized 404 checks (D04)"
+echo "==> [8/22] Permissions user directory & unauthorized 404 checks (D04)"
 USERS=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/users?search=&limit=5")
 py_assert "${USERS}" "assert isinstance(data, list), f'Expected list from /api/users, got {data}'"
 
@@ -153,7 +157,7 @@ if [[ "${UNAUTH_READ}" != "404" || "${UNAUTH_SHARE}" != "404" ]]; then
 fi
 echo "OK (user list valid, unshared read/share hidden with 404)"
 
-echo "==> [9/14] Permissions sharing flow (POST /share 204, duplicate 409, reader 200, reader write 403)"
+echo "==> [9/22] Permissions sharing flow (POST /share 204, duplicate 409, reader 200, reader write 403)"
 SHARE_STATUS=$(http_status POST "${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}/share" "{\"userId\":\"${USER_B}\"}")
 if [[ "${SHARE_STATUS}" != "204" ]]; then
   echo "FAIL: Expected HTTP 204 sharing snippet, got ${SHARE_STATUS}" >&2
@@ -186,7 +190,7 @@ if [[ "${READER_PUT}" != "403" || "${READER_DEL}" != "403" ]]; then
 fi
 echo "OK"
 
-echo "==> [10/14] Test cases CRUD (POST/GET/PUT /api/snippets/{id}/tests)"
+echo "==> [10/22] Test cases CRUD (POST/GET/PUT /api/snippets/{id}/tests)"
 CREATED_TEST=$(curl -fsS -X POST \
   -H "Content-Type: application/json" \
   -H "X-User-Id: ${USER_A}" \
@@ -209,7 +213,7 @@ UPDATED_TEST=$(curl -fsS -X PUT \
 py_assert "${UPDATED_TEST}" "assert data.get('name') == 'prints-42-v2'"
 echo "OK (testId=${TEST_ID})"
 
-echo "==> [11/14] Run test via Language (POST /api/snippets/{id}/tests/{testId}/run)"
+echo "==> [11/22] Run test via Language (POST /api/snippets/{id}/tests/{testId}/run)"
 RUN_RESULT=$(curl -fsS -X POST \
   -H "X-User-Id: ${USER_A}" \
   "${BASE_URL}/api/snippets/${SNIPPET_ID}/tests/${TEST_ID}/run")
@@ -221,7 +225,7 @@ print(data['status'])
 ")
 echo "OK (status=${RUN_STATUS})"
 
-echo "==> [12/14] Delete test case (DELETE /api/snippets/{id}/tests/{testId})"
+echo "==> [12/22] Delete test case (DELETE /api/snippets/{id}/tests/{testId})"
 DEL_TEST_STATUS=$(http_status DELETE "${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}/tests/${TEST_ID}")
 if [[ "${DEL_TEST_STATUS}" != "204" ]]; then
   echo "FAIL: Expected HTTP 204 deleting test, got ${DEL_TEST_STATUS}" >&2
@@ -229,7 +233,7 @@ if [[ "${DEL_TEST_STATUS}" != "204" ]]; then
 fi
 echo "OK (HTTP 204)"
 
-echo "==> [13/14] Rules get & enqueue (GET/PUT /api/rules/printscript/{lint,format})"
+echo "==> [13/22] Rules get & enqueue (GET/PUT /api/rules/printscript/{lint,format})"
 for KIND in lint format; do
   RULE_GET=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/rules/printscript/${KIND}")
   py_assert "${RULE_GET}" "
@@ -260,7 +264,136 @@ assert data.get('queued', 0) >= 1, f'Expected queued >= 1: {data}'
 done
 echo "OK (lint & format accepted with HTTP 202)"
 
-echo "==> [14/14] Delete snippet & verify cleanup (DELETE -> 204, subsequent GET -> 403/404)"
+echo "==> [15/22] On-demand format (POST /api/snippets/format: valid -> 200, invalid -> 422)"
+FMT_FILE=$(mktemp)
+FMT_STATUS=$(curl -sS -o "${FMT_FILE}" -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER_A}" \
+  -d '{"content":"let   x:number=1;println(x);","language":"printscript","version":"1.1"}' \
+  "${BASE_URL}/api/snippets/format")
+if [[ "${FMT_STATUS}" != "200" ]]; then
+  echo "FAIL: Expected HTTP 200 formatting valid code, got ${FMT_STATUS}: $(cat "${FMT_FILE}")" >&2
+  exit 1
+fi
+py_assert "$(cat "${FMT_FILE}")" "
+c = data.get('content')
+assert isinstance(c, str) and 'println' in c and 'let' in c, f'Unexpected formatted content: {data}'
+"
+FMT_BAD_STATUS=$(curl -sS -o "${FMT_FILE}" -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER_A}" \
+  -d '{"content":"let x: number = ;","language":"printscript","version":"1.1"}' \
+  "${BASE_URL}/api/snippets/format")
+if [[ "${FMT_BAD_STATUS}" != "422" ]]; then
+  echo "FAIL: Expected HTTP 422 formatting invalid code, got ${FMT_BAD_STATUS}: $(cat "${FMT_FILE}")" >&2
+  exit 1
+fi
+py_assert "$(cat "${FMT_FILE}")" "
+d = data.get('details')
+assert isinstance(d, list) and len(d) > 0, f'Expected violations in details: {data}'
+"
+rm -f "${FMT_FILE}"
+echo "PASS (200 with formatted content, 422 with violations)"
+
+echo "==> [16/22] Real validation on create (invalid snippet -> 422 with rule/line/column)"
+INV_FILE=$(mktemp)
+INV_STATUS=$(curl -sS -o "${INV_FILE}" -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER_A}" \
+  -d '{"name":"e2e-invalid","language":"printscript","version":"1.1","content":"let x: number = ;"}' \
+  "${BASE_URL}/api/snippets")
+if [[ "${INV_STATUS}" != "422" ]]; then
+  echo "FAIL: Expected HTTP 422 creating invalid snippet, got ${INV_STATUS}: $(cat "${INV_FILE}")" >&2
+  exit 1
+fi
+py_assert "$(cat "${INV_FILE}")" "
+d = data.get('details')
+assert isinstance(d, list) and len(d) > 0, f'Expected details: {data}'
+for k in ('rule', 'line', 'column'):
+    assert d[0].get(k) is not None, f'Missing/null {k} in violation {d[0]}'
+"
+rm -f "${INV_FILE}"
+echo "PASS (422 with rule/line/column)"
+
+echo "==> [17/22] Async rules + worker round trip (PUT /api/rules/printscript/lint -> 202, poll lintStatus)"
+LINT_FILE=$(mktemp)
+LINT_STATUS_CODE=$(curl -sS -o "${LINT_FILE}" -w "%{http_code}" -X PUT \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER_A}" \
+  -d '{"config":{}}' "${BASE_URL}/api/rules/printscript/lint")
+if [[ "${LINT_STATUS_CODE}" != "202" ]]; then
+  echo "FAIL: Expected HTTP 202 on PUT rules/lint, got ${LINT_STATUS_CODE}: $(cat "${LINT_FILE}")" >&2
+  exit 1
+fi
+py_assert "$(cat "${LINT_FILE}")" "assert data.get('queued', 0) >= 1, f'Expected queued >= 1: {data}'"
+rm -f "${LINT_FILE}"
+LINT_RESULT=""
+for i in $(seq 1 30); do
+  LINT_RESULT=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('lintStatus'))")
+  if [[ "${LINT_RESULT}" == "COMPLIANT" || "${LINT_RESULT}" == "NON_COMPLIANT" ]]; then
+    break
+  fi
+  sleep 2
+done
+if [[ "${LINT_RESULT}" != "COMPLIANT" && "${LINT_RESULT}" != "NON_COMPLIANT" ]]; then
+  echo "FAIL: lintStatus still '${LINT_RESULT}' after 60s (worker round trip through Redis did not complete)" >&2
+  exit 1
+fi
+echo "PASS (202 queued, lintStatus=${LINT_RESULT} after ~$((i * 2))s)"
+
+echo "==> [18/22] Download: original is exact, formatted works, original preserved"
+EXPECTED_ORIGINAL=$'let x: number = 42;\nprintln(x);'
+DL_ORIG=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}/download")
+if [[ "${DL_ORIG}" != "${EXPECTED_ORIGINAL}" ]]; then
+  echo "FAIL: Original download differs from uploaded content: ${DL_ORIG}" >&2
+  exit 1
+fi
+DL_FORMATTED=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}/download?formatted=true")
+if [[ -z "${DL_FORMATTED}" || "${DL_FORMATTED}" != *"println"* ]]; then
+  echo "FAIL: Formatted download unexpected body: ${DL_FORMATTED}" >&2
+  exit 1
+fi
+DETAIL_AFTER=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}")
+py_assert "${DETAIL_AFTER}" "assert data['content'] == 'let x: number = 42;\nprintln(x);', f'Stored content changed: {data[\"content\"]!r}'"
+echo "PASS"
+
+echo "==> [19/22] Interactive execution over WebSocket (/api/snippets/{id}/run)"
+RUN_SNIPPET=$(curl -fsS -X POST \
+  -H "Content-Type: application/json" -H "X-User-Id: ${USER_A}" \
+  -d '{"name":"e2e-run","language":"printscript","version":"1.1","content":"let name: string = readInput(\"Name?\");\nprintln(\"Hello \" + name);"}' \
+  "${BASE_URL}/api/snippets")
+RUN_SNIPPET_ID=$(py_assert "${RUN_SNIPPET}" "print(data['id'])")
+RUN_SNIPPET_ID_TO_DELETE="${RUN_SNIPPET_ID}"
+timeout 150 python3 "$(dirname "${BASH_SOURCE[0]}")/e2e-ws-check.py" "${BASE_URL}" "${RUN_SNIPPET_ID}" "${USER_A}" "e2e-stranger-${RUN_ID}"
+curl -sS -o /dev/null -X DELETE -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${RUN_SNIPPET_ID}" || true
+RUN_SNIPPET_ID_TO_DELETE=""
+echo "PASS (owner run + unauthorized rejected)"
+
+echo "==> [20/22] Revalidate (POST /api/snippets/revalidate -> 202 {queued})"
+REV_FILE=$(mktemp)
+REV_STATUS=$(curl -sS -o "${REV_FILE}" -w "%{http_code}" -X POST -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/revalidate")
+if [[ "${REV_STATUS}" != "202" ]]; then
+  echo "FAIL: Expected HTTP 202 on revalidate, got ${REV_STATUS}: $(cat "${REV_FILE}")" >&2
+  exit 1
+fi
+py_assert "$(cat "${REV_FILE}")" "assert isinstance(data.get('queued'), int) and data['queued'] >= 0, f'Unexpected body: {data}'"
+rm -f "${REV_FILE}"
+echo "PASS (202 queued)"
+
+echo "==> [21/22] Revalidation settles (lintStatus leaves PENDING again)"
+REV_LINT=""
+for i in $(seq 1 30); do
+  REV_LINT=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('lintStatus'))")
+  if [[ "${REV_LINT}" == "COMPLIANT" || "${REV_LINT}" == "NON_COMPLIANT" ]]; then
+    break
+  fi
+  sleep 2
+done
+if [[ "${REV_LINT}" != "COMPLIANT" && "${REV_LINT}" != "NON_COMPLIANT" ]]; then
+  echo "FAIL: lintStatus still '${REV_LINT}' after revalidation + 60s" >&2
+  exit 1
+fi
+echo "PASS (lintStatus=${REV_LINT})"
+
+echo "==> [22/22] Delete snippet & verify cleanup (DELETE -> 204, subsequent GET -> 403/404)"
 DEL_STATUS=$(http_status DELETE "${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}")
 if [[ "${DEL_STATUS}" != "204" ]]; then
   echo "FAIL: Expected HTTP 204 on DELETE snippet, got ${DEL_STATUS}" >&2
@@ -274,4 +407,4 @@ fi
 SNIPPET_ID=""
 echo "OK (HTTP 204, post-delete GET returned ${AFTER_DEL_OWNER})"
 
-echo "ALL 14 MULTI-SERVICE E2E CHECKS PASSED against ${BASE_URL}"
+echo "ALL 22 MULTI-SERVICE E2E CHECKS PASSED against ${BASE_URL}"
