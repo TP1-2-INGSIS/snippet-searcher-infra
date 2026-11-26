@@ -1,10 +1,10 @@
 # User stories y cómo las cubre el sistema
 
-Fuente: "Snippet Searcher - Casos de uso" (US1 a US16). Las rutas son las de Snippets, que es la única puerta de la UI (nginx las expone bajo `/api`). "En implementación" marca lo que está en PRs abiertos o por abrirse al cerrar este documento.
+Fuente: "Snippet Searcher - Casos de uso" (US1 a US16). Las rutas son las de Snippets, que es la única puerta de la UI (nginx las expone bajo `/api`).
 
 | US | Título | Cómo la cubre el sistema |
 |---|---|---|
-| 1 | Crear snippet mediante archivo | Snippets `POST /snippets/upload`. Valida con Language (`/languages/{lang}/validate`); si es inválido responde 422 con `{rule, message, line, column}`. Lintea y guarda el snippet y registra al owner en Permissions. El contenido pasa a Assets: en implementación (SNIP-4). Ver [secuencia (a)](secuencias.md#a-crear-un-snippet-con-validación). |
+| 1 | Crear snippet mediante archivo | Snippets `POST /snippets/upload`. Valida con Language (`/languages/{lang}/validate`); si es inválido responde 422 con `{rule, message, line, column}`. Lintea y guarda el snippet y registra al owner en Permissions. El contenido se guarda en Assets (`SNIPPET_STORAGE=assets`), con compensación si algo falla. Ver [secuencia (a)](secuencias.md#a-crear-un-snippet-con-validación). |
 | 2 | Actualizar snippet mediante archivo | Snippets `PUT /snippets/{id}/upload`, con la misma validación y el mismo 422. Permiso de escritura consultado a Permissions. |
 | 3 | Crear snippet en editor | Snippets `POST /snippets`, mismas reglas que la US1. |
 | 4 | Actualizar snippet en editor | Snippets `PUT /snippets/{id}`, mismas reglas que la US2. |
@@ -26,5 +26,5 @@ Fuente: "Snippet Searcher - Casos de uso" (US1 a US16). Las rutas son las de Sni
 | Requisito | Cómo se cumple |
 |---|---|
 | Usuarios autenticados | Auth0 (login en la UI) y validación del JWT en Snippets. |
-| Re-evaluar todos los snippets con cada versión nueva del parser | Comparación de `engineVersion` y re-encolado. En implementación (SNIP-6). Ver [secuencia (f)](secuencias.md#f-revalidación-cuando-cambia-la-versión-del-parser). |
+| Re-evaluar todos los snippets con cada versión nueva del parser | Comparación de `engineVersion` y re-encolado. `EngineVersionWatcher` al arrancar y cada `ENGINE_CHECK_INTERVAL`, más `POST /snippets/revalidate`. Ver [secuencia (f)](secuencias.md#f-revalidación-cuando-cambia-la-versión-del-parser). |
 | Otros lenguajes en el futuro | Language expone `/languages/{lang}/...` y `GET /languages`; Snippets no conoce el motor. |
