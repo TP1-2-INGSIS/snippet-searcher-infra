@@ -35,8 +35,7 @@ Resumen de las decisiones transversales de la plataforma. Las decisiones interna
 - **Consecuencias:** los workers no dependen de Assets. Los mensajes son más grandes.
 
 ### T7 · Revalidación por `engineVersion`
-- **Estado:** en implementación (SNIP-6). `engineVersion` en `GET /languages` ya está en Language.
-- **Decisión:** Language informa la versión de su motor (la del artefacto CNC) en `GET /languages`. Snippets la compara al arrancar y periódicamente (intervalo configurable); si cambió, re-encola validación y lint de los snippets del lenguaje.
+- **Decisión:** Language informa la versión de su motor (la del artefacto CNC) en `GET /languages`. `EngineVersionWatcher` de Snippets la compara con la última guardada (tabla `language_engine_version`) al arrancar y cada `ENGINE_CHECK_INTERVAL` (10 minutos por defecto). Si cambió, o el lenguaje es nuevo, encola solo `LINT` por snippet, con las reglas de su owner; un código inválido termina en `FAILED`. `POST /snippets/revalidate` hace lo mismo a pedido para los snippets del usuario.
 - **Consecuencias:** cumple "con cada versión nueva del parser se re-evalúan todos los snippets", sin depender de un aviso externo.
 
 ### T8 · US16 sigue sincrónico

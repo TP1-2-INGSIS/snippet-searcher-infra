@@ -4,7 +4,7 @@ Los flujos más importantes de la plataforma. Los endpoints y mensajes son los d
 
 ## (a) Crear un snippet con validación
 
-El usuario crea el snippet (por editor, `POST /snippets`, o por archivo, `POST /snippets/upload`). Snippets valida el código con Language, lo lintea para fijar `lint_status`, lo guarda y registra al owner en Permissions. Si es inválido, responde 422 con la regla, la línea y la columna. Si falla el alta del permiso, borra el snippet (compensación). Hoy el contenido se guarda en Postgres; pasarlo a Assets está en implementación (SNIP-4).
+El usuario crea el snippet (por editor, `POST /snippets`, o por archivo, `POST /snippets/upload`). Snippets valida el código con Language, lo lintea para fijar `lint_status`, guarda la metadata, sube el contenido a Assets y registra al owner en Permissions. Si es inválido, responde 422 con la regla, la línea y la columna. Si falla la subida a Assets o el alta del permiso, borra la metadata (y el contenido, si ya estaba subido) y responde 502. El contenido va a Assets con `SNIPPET_STORAGE=assets` (ver `ASSETS_SERVICE_URL`); con `database` queda en la columna `content`.
 
 ```mermaid
 sequenceDiagram
@@ -28,15 +28,20 @@ sequenceDiagram
         S->>L: POST /languages/{lang}/lint (reglas del usuario)
         L-->>S: violaciones
         S->>S: fija lint_status (COMPLIANT o NON_COMPLIANT)
-        S->>S: guarda el snippet (contenido en Postgres)
-        opt en implementación (SNIP-4)
-            S->>A: POST /v1/assets/{snippetId} (contenido en Assets)
+        S->>S: guarda la metadata
+        S->>A: POST /v1/assets/{snippetId} (contenido)
+        alt falla Assets
+            A-->>S: error
+            S->>S: borra la metadata (compensación)
+            S-->>UI: 502 DOWNSTREAM_ERROR
+        else contenido guardado
             A-->>S: 201
+            S->>P: POST /permissions (OWNER)
         end
-        S->>P: POST /permissions (OWNER)
         alt falla el alta del permiso
             P-->>S: error
-            S->>S: borra el snippet (compensación)
+            S->>A: DELETE /v1/assets/{snippetId}
+            S->>S: borra la metadata (compensación)
             S-->>UI: 502 DOWNSTREAM_ERROR
         else ok
             P-->>S: 201
@@ -218,30 +223,28 @@ Al editar un snippet, Snippets corre todos sus tests de forma sincrónica despu�
 
 ## (f) Revalidación cuando cambia la versión del parser
 
-Estado: en implementación (SNIP-6).
-
-Language informa la versión de su motor (`engineVersion`) en `GET /languages`. Snippets la compara al arrancar y periódicamente, con un intervalo configurable. Si cambió, vuelve a encolar validación y lint de todos los snippets de ese lenguaje por el mismo mecanismo asíncrono del diagrama (c).
+Language informa la versión de su motor (`engineVersion`) en `GET /languages`. `EngineVersionWatcher` de Snippets la compara con la última guardada al arrancar y cada `ENGINE_CHECK_INTERVAL` (10 minutos por defecto). Si cambió, o el lenguaje se ve por primera vez, encola un `LINT` por snippet por el mismo mecanismo asíncrono del diagrama (c). Un código que ya no parsea termina en `FAILED`. Para demos existe `POST /snippets/revalidate`, que re-encola el lint de los snippets del usuario (202 con `{queued}`).
 
 ```mermaid
 sequenceDiagram
-    participant J as Scheduler de Snippets
+    participant J as EngineVersionWatcher (Snippets)
     participant L as Language
     participant DB as snippets-db
     participant R as Redis Streams
     participant W as Language workers
 
-    Note over J: al arrancar y cada intervalo configurable
+    Note over J: al arrancar y cada ENGINE_CHECK_INTERVAL
     J->>L: GET /languages
     L-->>J: [{id, versions, engineVersion}]
     J->>DB: lee la engineVersion guardada
     alt cambió la engineVersion
-        J->>DB: guarda la nueva, marca los snippets del lenguaje en PENDING
+        J->>DB: marca los snippets del lenguaje en PENDING y guarda la nueva versión
         loop por cada snippet del lenguaje
-            J->>R: XADD tasks:printscript (VALIDATE y LINT)
+            J->>R: XADD tasks:printscript (LINT)
         end
         R->>W: tareas
         W->>R: XADD tasks:results
-        Note over R,DB: el consumidor actualiza validez y lint (ver diagrama c)
+        Note over R,DB: el consumidor actualiza el lint (INVALID_SOURCE queda FAILED, ver diagrama c)
     else igual
         J->>J: no hace nada
     end
