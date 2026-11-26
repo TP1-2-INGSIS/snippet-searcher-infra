@@ -34,7 +34,7 @@ jobs:
       - name: Pull public service images and ensure UI image
         if: ${{ inputs.target_url == '' }}
         run: |
-          docker compose -f docker-compose.e2e.yml pull snippet-service language-service permission-service snippets-db permissions-db redis proxy
+          docker compose -f docker-compose.e2e.yml pull snippet-service language-service permission-service snippets-db permissions-db redis proxy assets-service assets-db azurite
           if ! docker pull ghcr.io/tp1-2-ingsis/printscript-ui:latest; then
             echo "GHCR printscript-ui image requires package-level auth; building from public TP1-2-INGSIS/printscript-ui repo..."
             docker build \

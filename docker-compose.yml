@@ -40,6 +40,8 @@ services:
       AUTH0_AUDIENCE: "${AUTH0_AUDIENCE:-}"
       AUTH_HEADER_IDENTITY_ENABLED: "false"
       REDIS_URL: "redis://redis:6379"
+      ASSETS_SERVICE_URL: "http://assets-service:8080"
+      SNIPPET_STORAGE: "assets"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
@@ -116,6 +118,57 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  assets-service:
+    image: ${ASSETS_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/assets:latest}
+    container_name: snippet-searcher-assets-service
+    environment:
+      SPRING_PROFILES_ACTIVE: "default"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://assets-db:5432/assets"
+      SPRING_DATASOURCE_USERNAME: "${ASSETS_DB_USER:-assets}"
+      SPRING_DATASOURCE_PASSWORD: "${ASSETS_DB_PASSWORD:-assets}"
+      AZURE_STORAGE_CONNECTION_STRING: "${AZURE_STORAGE_CONNECTION_STRING:-}"
+      AZURE_STORAGE_CONTAINER: "${AZURE_STORAGE_CONTAINER:-snippets}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
+    networks:
+      - backend
+    depends_on:
+      assets-db:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+    mem_limit: 512m
+    restart: unless-stopped
+
+  assets-db:
+    image: postgres:16-alpine
+    container_name: snippet-searcher-assets-db
+    environment:
+      POSTGRES_DB: "assets"
+      POSTGRES_USER: "${ASSETS_DB_USER:-assets}"
+      POSTGRES_PASSWORD: "${ASSETS_DB_PASSWORD:-assets}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ASSETS_DB_USER:-assets} -d assets"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - assets_db_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    restart: unless-stopped
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.34.0
+    container_name: snippet-searcher-azurite
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--loose", "--skipApiVersionCheck", "--location", "/data"]
+    volumes:
+      - azurite_data:/data
+    networks:
+      - backend
+    mem_limit: 256m
+    restart: unless-stopped
+
   snippets-db:
     image: postgres:16-alpine
     container_name: snippet-searcher-snippets-db
@@ -162,3 +215,5 @@ volumes:
   snippets_db_data:
   permissions_db_data:
   redis_data:
+  assets_db_data:
+  azurite_data:
