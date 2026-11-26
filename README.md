@@ -22,6 +22,8 @@ flowchart TD
             SS["📦 snippet-service (Core API)<br/>(Puerto interno: 8080)"]
             LS["📦 language-service (Engine)<br/>(Puerto interno: 8080)"]
             PS["📦 permission-service (Authz)<br/>(Puerto interno: 8080)"]
+            LW["⚙️ language-worker x2<br/>(APP_MODE=worker)"]
+            RD[("🗄️ redis<br/>(Streams, puerto interno 6379)")]
             Certbot["🤖 Certbot (Let's Encrypt)<br/>(Daemon de renovación)"]
         end
     end
@@ -34,6 +36,9 @@ flowchart TD
     
     SS -- "HTTP interno" --> LS
     SS -- "HTTP interno" --> PS
+    SS -- "tasks:printscript" --> RD
+    RD -- "tasks:printscript" --> LW
+    LW -- "tasks:results" --> RD
 ```
 
 ### Ventajas del Esquema de Ingress:
@@ -98,8 +103,23 @@ Flags fijos (no vienen de `.env`):
 * compose/stack: `AUTH_HEADER_IDENTITY_ENABLED=false` (snippet-service exige un JWT válido) y `USERS_PROVIDER=auth0` (permission-service).
 * `docker-compose.e2e.yml`: `AUTH_HEADER_IDENTITY_ENABLED=true` y `USERS_PROVIDER=none`, así el smoke test sigue identificando usuarios con `X-User-Id` sin necesitar Auth0.
 
-> [!WARNING] Language en modo web
-> language-service corre con `APP_MODE=web` (y sin `REDIS_URL`) hasta que el stack tenga Redis. No pasarlo a `worker` o `all` antes de agregar Redis y el servicio `language-worker`.
+### Redis, workers y streams
+
+El procesamiento asíncrono (lint/format masivo al cambiar reglas, US12/US15) usa **Redis Streams**:
+
+| Servicio | Rol |
+|---|---|
+| `redis` | `redis:7-alpine` con AOF (`--appendonly yes`), `--maxmemory-policy noeviction` (los streams nunca se desalojan) y volumen `redis_data`. Solo en la red interna: no publica puertos. En e2e usa `tmpfs` y sin AOF. |
+| `language-service` | `APP_MODE=web`: solo atiende REST. Recibe `REDIS_URL` por si más adelante publica tareas. |
+| `language-worker` | Misma imagen que `language-service` con `APP_MODE=worker`. Consume `tasks:printscript` (consumer group `language-workers`) y publica en `tasks:results`. 2 réplicas en el stack, 1 en compose/e2e. |
+| `snippet-service` | Publica una tarea por snippet en `tasks:printscript` y consume `tasks:results`. Lee `REDIS_URL`. |
+
+- `REDIS_URL=redis://redis:6379` en `snippet-service`, `language-service` y `language-worker`.
+- Variables opcionales de Language: `REDIS_STREAM_TASKS`, `REDIS_STREAM_RESULTS`, `REDIS_STREAM_GROUP`, `REDIS_STREAM_CONSUMER`.
+- **Consumer name:** en el stack, `REDIS_STREAM_CONSUMER=worker-{{.Task.Slot}}` (Swarm expande la plantilla en `environment` al crear cada tarea), así cada réplica tiene un nombre único (`worker-1`, `worker-2`). En compose/e2e es `worker-1`.
+- **Memoria (stack):** redis 256M, worker 512M con `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75` para que la JVM respete el límite.
+- **Orden de despliegue:** Redis primero y workers después. En compose se garantiza con `depends_on` + healthcheck. En Swarm `depends_on` se ignora: los workers reintentan hasta que Redis responde (`restart_policy: any`); si es la primera vez, conviene `docker service scale snippet-searcher_language-worker=0` antes y volver a 2 cuando `snippet-searcher_redis` esté `1/1`.
+- Inspeccionar los streams: `docker compose exec redis redis-cli XINFO GROUPS tasks:printscript`.
 
 ---
 
