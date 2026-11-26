@@ -17,7 +17,7 @@ Resumen de las decisiones transversales de la plataforma. Las decisiones interna
 
 ### T3 · Usuarios en Auth0, no en Permissions
 - **Contexto:** Permissions tenía registro y login propios con BCrypt.
-- **Decisión:** Permissions busca usuarios en la Management API de Auth0 (`GET /api/v2/users`) y deja de tener tabla de usuarios. Se eliminan `/auth/register`, `/auth/login` y BCrypt. Los permisos ya guardan `user_id` como string sin FK, así que el `sub` de Auth0 sirve tal cual.
+- **Decisión (ya en `main`):** `GET /users?search=&limit=` de Permissions busca en la Management API de Auth0 (`GET /api/v2/users`). Se eliminaron `/auth/register`, `/auth/login`, la entidad `User` y BCrypt. Los permisos guardan `user_id` como string sin FK, así que el `sub` de Auth0 sirve tal cual. Se elige con `USERS_PROVIDER`: `auth0` busca en Auth0; `none` (el default) devuelve una lista vacía y avisa al arrancar. Con `auth0` hacen falta `AUTH0_DOMAIN`, `AUTH0_MGMT_CLIENT_ID` y `AUTH0_MGMT_CLIENT_SECRET`, y el servicio no arranca si falta alguna. Si Auth0 falla, responde 502 `USERS_PROVIDER_ERROR`.
 - **Consecuencias:** hace falta una app Machine to Machine con scope `read:users` y sus credenciales en el `.env` de la VM.
 
 ### T4 · Contenido original y formateado por separado
@@ -35,7 +35,8 @@ Resumen de las decisiones transversales de la plataforma. Las decisiones interna
 - **Consecuencias:** los workers no dependen de Assets. Los mensajes son más grandes.
 
 ### T7 · Revalidación por `engineVersion`
-- **Decisión:** Language informa la versión de su motor (la del artefacto CNC) en `GET /languages`. Snippets la compara al arrancar y cada 10 minutos; si cambió, re-encola validación y lint de los snippets del lenguaje.
+- **Estado:** en implementación (SNIP-6). `engineVersion` en `GET /languages` ya está en Language.
+- **Decisión:** Language informa la versión de su motor (la del artefacto CNC) en `GET /languages`. Snippets la compara al arrancar y periódicamente (intervalo configurable); si cambió, re-encola validación y lint de los snippets del lenguaje.
 - **Consecuencias:** cumple "con cada versión nueva del parser se re-evalúan todos los snippets", sin depender de un aviso externo.
 
 ### T8 · US16 sigue sincrónico

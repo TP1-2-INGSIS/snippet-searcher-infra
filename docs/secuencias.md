@@ -4,7 +4,7 @@ Los flujos más importantes de la plataforma. Los endpoints y mensajes son los d
 
 ## (a) Crear un snippet con validación
 
-El usuario crea el snippet (por editor, `POST /snippets`, o por archivo, `POST /snippets/upload`). Snippets valida el código con Language antes de guardar nada. Si es inválido, responde 422 con la regla, la línea y la columna.
+El usuario crea el snippet (por editor, `POST /snippets`, o por archivo, `POST /snippets/upload`). Snippets valida el código con Language, lo lintea para fijar `lint_status`, lo guarda y registra al owner en Permissions. Si es inválido, responde 422 con la regla, la línea y la columna. Si falla el alta del permiso, borra el snippet (compensación). Hoy el contenido se guarda en Postgres; pasarlo a Assets está en implementación (SNIP-4).
 
 ```mermaid
 sequenceDiagram
@@ -25,19 +25,30 @@ sequenceDiagram
         UI-->>U: muestra regla, línea y columna
     else código válido
         L-->>S: ok
-        S->>A: POST /v1/assets/{snippetId} (contenido)
-        A-->>S: 201
-        S->>S: guarda metadata (estado de lint PENDING)
+        S->>L: POST /languages/{lang}/lint (reglas del usuario)
+        L-->>S: violaciones
+        S->>S: fija lint_status (COMPLIANT o NON_COMPLIANT)
+        S->>S: guarda el snippet (contenido en Postgres)
+        opt en implementación (SNIP-4)
+            S->>A: POST /v1/assets/{snippetId} (contenido en Assets)
+            A-->>S: 201
+        end
         S->>P: POST /permissions (OWNER)
-        P-->>S: 200
-        S-->>UI: 201 con el snippet
-        UI-->>U: snippet creado
+        alt falla el alta del permiso
+            P-->>S: error
+            S->>S: borra el snippet (compensación)
+            S-->>UI: 502 DOWNSTREAM_ERROR
+        else ok
+            P-->>S: 201
+            S-->>UI: 201 con el snippet
+            UI-->>U: snippet creado
+        end
     end
 ```
 
 ## (b) Compartir con búsqueda de usuarios de Auth0
 
-Mientras el usuario escribe (con debounce de 300 ms), la UI busca usuarios. Permissions los consulta en la Management API de Auth0. Al elegir uno, Snippets verifica que quien comparte sea `OWNER` y registra el permiso de lectura.
+Mientras el usuario escribe (con debounce de 300 ms), la UI busca usuarios. Permissions los consulta en la Management API de Auth0. Al elegir uno, Snippets verifica con `/permissions/check` que quien comparte sea `OWNER` y registra un permiso `READ` con `POST /permissions`.
 
 ```mermaid
 sequenceDiagram
@@ -58,19 +69,21 @@ sequenceDiagram
 
     U->>UI: elige un usuario y confirma
     UI->>S: POST /api/snippets/{id}/share {userId}
-    S->>P: GET /permissions/check (el owner puede compartir)
-    P-->>S: allowed
-    S->>P: POST /permissions/share {snippetId, userId}
+    S->>P: GET /permissions/check?userId&snippetId&action=SHARE
+    P-->>S: allowed (es owner)
+    S->>P: POST /permissions {snippetId, userId, role READ}
     alt ya estaba compartido
         P-->>S: 409
         S-->>UI: 409 ALREADY_SHARED
     else nuevo
-        P-->>S: 200
+        P-->>S: 201
         S-->>UI: 204
     end
 ```
 
 ## (c) Aplicar reglas de forma asíncrona (lint y formato)
+
+Estado: en implementación (Snippets PR #20). Los workers de Language ya están en `main`.
 
 `PUT /snippets/rules/{language}/lint` (o `/format`) guarda las reglas, deja una fila de estado por snippet y publica una tarea por snippet. Responde 202 sin esperar. Los workers de Language procesan y publican resultados; Snippets los consume y actualiza el estado. La UI consulta el listado y ve `pending` hasta que llega el resultado.
 
@@ -104,16 +117,16 @@ sequenceDiagram
         W->>R: XACK
     else falla el worker (excepción o caída)
         Note over W,R: no hay ACK, la tarea queda pendiente
-        R->>W: re-entrega (XAUTOCLAIM, intento 2 y 3)
+        R->>W: re-entrega (XPENDING + XCLAIM, intento 2 y 3)
         opt se agotan los 3 intentos (REDIS_MAX_ATTEMPTS)
             W->>R: XADD tasks:results (status FAILED, errorMessage)
             W->>R: XACK
         end
     end
 
-    R->>C: XREADGROUP (tasks:results)
+    R->>C: XREADGROUP (tasks:results, con XAUTOCLAIM de lo pendiente)
     C->>DB: actualiza el estado si el contentHash coincide
-    Note over C,DB: OK sin errores = compliant, OK con errores = non-compliant, INVALID_SOURCE o FAILED = FAILED
+    Note over C,DB: en lint, OK sin errores = COMPLIANT y OK con errores = NON_COMPLIANT, en format OK = DONE, INVALID_SOURCE o FAILED = FAILED
     UI->>S: GET /api/snippets (polling)
     S-->>UI: estado final (compliant, non-compliant o failed)
 
@@ -125,6 +138,8 @@ sequenceDiagram
 El proceso es tolerante a fallos: un snippet que falla tres veces queda en `FAILED` y el resto sigue, así que no se frena el lote. Si el contenido cambió mientras la tarea estaba en vuelo, el `contentHash` no coincide y el resultado se descarta.
 
 ## (d) Ejecución interactiva por WebSocket
+
+Estado: en implementación (Snippets PR #22). El lado de Language (`/languages/{language}/run`) ya está en `main`.
 
 La UI abre un WebSocket contra Snippets, que valida el token y el permiso y abre otro hacia Language. Snippets reenvía los mensajes en ambos sentidos. El intérprete se queda esperando cuando pide un input y cada `println` se manda al instante.
 
@@ -139,7 +154,7 @@ sequenceDiagram
     U->>UI: Run
     UI->>S: WSS /api/snippets/{id}/run?access_token=JWT
     S->>S: valida el JWT
-    S->>P: GET /permissions/can-read
+    S->>P: GET /permissions/check?userId&snippetId&action=READ
     alt sin autenticación o sin permiso
         S-->>UI: cierre 1008
     else autorizado
@@ -162,7 +177,11 @@ sequenceDiagram
         else error de sintaxis, de runtime o timeout de input (60 s)
             L-->>S: {type: error, message, line, column}
             S-->>UI: {type: error, message, line, column}
-            S-->>UI: cierre 1000
+            L-->>S: cierre 1000
+            S-->>UI: cierre 1000 (reenvía el código de Language)
+        else Language no responde, se cae o vence el idle del relay
+            S-->>UI: {type: error, message}
+            S-->>UI: cierre 1011
         else el usuario corta
             UI->>S: {type: stop}
             S->>L: {type: stop}
@@ -171,7 +190,7 @@ sequenceDiagram
     end
 ```
 
-Los errores internos o el límite de 5 minutos cierran con 1011, y las violaciones del protocolo con 1008.
+Códigos de cierre de Language: 1000 para `finished`, `stop`, errores del programa y timeout de input; 1008 para violaciones del protocolo y si no llega `start` a los 10 s; 1011 para "busy", el límite de 5 minutos y errores internos. El relay reenvía el código de Language, usa 1008 para sus propias fallas de autenticación o permiso, y manda `error` más 1011 si Language no responde, se corta o vence su idle.
 
 ## (e) Correr un test
 
@@ -188,7 +207,7 @@ sequenceDiagram
 
     U->>UI: Run test
     UI->>S: POST /api/snippets/{id}/tests/{testId}/run
-    S->>P: GET /permissions/can-read
+    S->>P: GET /permissions/check?userId&snippetId&action=READ
     P-->>S: allowed
     S->>A: GET /v1/assets/{snippetId}
     A-->>S: contenido
@@ -203,7 +222,9 @@ Al editar un snippet, Snippets corre todos sus tests de forma sincrónica despu�
 
 ## (f) Revalidación cuando cambia la versión del parser
 
-Language informa la versión de su motor (`engineVersion`) en `GET /languages`. Snippets la compara al arrancar y cada 10 minutos. Si cambió, vuelve a encolar validación y lint de todos los snippets de ese lenguaje por el mismo mecanismo asíncrono del diagrama (c).
+Estado: en implementación (SNIP-6).
+
+Language informa la versión de su motor (`engineVersion`) en `GET /languages`. Snippets la compara al arrancar y periódicamente, con un intervalo configurable. Si cambió, vuelve a encolar validación y lint de todos los snippets de ese lenguaje por el mismo mecanismo asíncrono del diagrama (c).
 
 ```mermaid
 sequenceDiagram
@@ -213,7 +234,7 @@ sequenceDiagram
     participant R as Redis Streams
     participant W as Language workers
 
-    Note over J: al arrancar y cada 10 minutos
+    Note over J: al arrancar y cada intervalo configurable
     J->>L: GET /languages
     L-->>J: [{id, versions, engineVersion}]
     J->>DB: lee la engineVersion guardada
