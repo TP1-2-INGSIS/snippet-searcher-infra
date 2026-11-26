@@ -229,7 +229,7 @@ if [[ "${DEL_TEST_STATUS}" != "204" ]]; then
 fi
 echo "OK (HTTP 204)"
 
-echo "==> [13/14] Rules get & apply (GET/PUT /api/rules/printscript/{lint,format})"
+echo "==> [13/14] Rules get & enqueue (GET/PUT /api/rules/printscript/{lint,format})"
 for KIND in lint format; do
   RULE_GET=$(curl -fsS -H "X-User-Id: ${USER_A}" "${BASE_URL}/api/rules/printscript/${KIND}")
   py_assert "${RULE_GET}" "
@@ -237,17 +237,28 @@ assert data.get('language') == 'printscript'
 assert data.get('kind') == '${KIND}'.upper()
 assert isinstance(data.get('config'), dict)
 "
-  RULE_PUT=$(curl -fsS -X PUT \
+  # Rules are applied asynchronously (workers via Redis Streams): the PUT answers 202 Accepted
+  # with the number of queued tasks and does not wait for any lint/format result.
+  RULE_PUT_FILE=$(mktemp)
+  RULE_PUT_STATUS=$(curl -sS -o "${RULE_PUT_FILE}" -w "%{http_code}" -X PUT \
     -H "Content-Type: application/json" \
     -H "X-User-Id: ${USER_A}" \
     -d '{"config":{}}' \
     "${BASE_URL}/api/rules/printscript/${KIND}")
+  if [[ "${RULE_PUT_STATUS}" != "202" ]]; then
+    echo "FAIL: Expected HTTP 202 on PUT rules/${KIND}, got ${RULE_PUT_STATUS}" >&2
+    cat "${RULE_PUT_FILE}" >&2
+    rm -f "${RULE_PUT_FILE}"
+    exit 1
+  fi
+  RULE_PUT=$(cat "${RULE_PUT_FILE}")
+  rm -f "${RULE_PUT_FILE}"
   py_assert "${RULE_PUT}" "
-assert data.get('processed', 0) >= 1, f'Expected processed >= 1: {data}'
-assert data.get('failed') == 0, f'Expected failed == 0: {data}'
+assert data.get('kind') == '${KIND}'.upper(), f'Unexpected kind: {data}'
+assert data.get('queued', 0) >= 1, f'Expected queued >= 1: {data}'
 "
 done
-echo "OK (lint & format applied cleanly)"
+echo "OK (lint & format accepted with HTTP 202)"
 
 echo "==> [14/14] Delete snippet & verify cleanup (DELETE -> 204, subsequent GET -> 403/404)"
 DEL_STATUS=$(http_status DELETE "${USER_A}" "${BASE_URL}/api/snippets/${SNIPPET_ID}")
