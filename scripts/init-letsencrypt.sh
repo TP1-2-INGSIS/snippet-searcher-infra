@@ -11,7 +11,6 @@ if [ -z "$DOMAIN" ] || [ -z "$CERTBOT_EMAIL" ]; then
 fi
 
 echo "=== 1. Asegurando que el stack esté desplegado en HTTP para el desafío ACME ==="
-git checkout -- ./nginx/conf.d/default.conf 2>/dev/null || true
 docker stack deploy --resolve-image=never -c docker-stack.yml snippet-searcher
 
 echo "=== 2. Solicitando certificado real a Let's Encrypt para $DOMAIN ==="
@@ -30,10 +29,10 @@ docker run --rm \
   --non-interactive
 
 echo "=== 3. Activando configuración HTTPS (TLS) en NGINX ==="
-envsubst '${DOMAIN}' < ./nginx/conf.d/ssl.conf.template > ./nginx/conf.d/default.conf
-
-PROXY_CONTAINER=$(docker ps -q -f name=snippet-searcher_proxy)
+# El proxy renderiza su config según exista o no el certificado (nginx/render-conf.sh).
+PROXY_CONTAINER=$(docker ps -q -f name=snippet-searcher_proxy | head -n 1)
 if [ -n "$PROXY_CONTAINER" ]; then
+  docker exec "$PROXY_CONTAINER" sh /nginx-src/render-conf.sh
   docker exec "$PROXY_CONTAINER" nginx -s reload
   echo "Certificado emitido y NGINX recargado con éxito en https://$DOMAIN"
 else
