@@ -1,0 +1,109 @@
+name: Deploy
+
+# push a dev -> VM de dev | push a main -> VM de prod | manual -> a elegir.
+on:
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Ambiente a desplegar"
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  contents: read
+
+# Un deploy por ambiente a la vez
+concurrency:
+  group: deploy-${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      TARGET_ENV: ${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+      # Los secrets no se pueden evaluar en `if:`; se mapean a variables y se chequean en un paso.
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEV_HOST: ${{ secrets.DEV_HOST }}
+      PROD_HOST: ${{ secrets.PROD_HOST }}
+    steps:
+      - name: Resolve target and check secrets
+        id: target
+        run: |
+          if [ "$TARGET_ENV" = "prod" ]; then
+            HOST="$PROD_HOST"; BRANCH="main"; HOST_SECRET="PROD_HOST"
+          else
+            HOST="$DEV_HOST"; BRANCH="dev"; HOST_SECRET="DEV_HOST"
+          fi
+          missing=""
+          [ -n "$DEPLOY_SSH_KEY" ] || missing="$missing DEPLOY_SSH_KEY"
+          [ -n "$DEPLOY_USER" ] || missing="$missing DEPLOY_USER"
+          [ -n "$HOST" ] || missing="$missing $HOST_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::notice title=Deploy omitido::Faltan secrets de organizacion:$missing. Se omite el deploy de $TARGET_ENV."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "enabled=true"
+              echo "host=$HOST"
+              echo "branch=$BRANCH"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # Host key: si existe el secret opcional DEPLOY_KNOWN_HOSTS (salida de `ssh-keyscan <host>`)
+      # se usa para fijarla (recomendado). Si no, se cae a ssh-keyscan, que es vulnerable a MITM
+      # en la primera conexion, y se emite un warning visible.
+      - name: Configure SSH
+        if: steps.target.outputs.enabled == 'true'
+        env:
+          HOST: ${{ steps.target.outputs.host }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning title=Host key sin fijar::DEPLOY_KNOWN_HOSTS no esta definido; se usa ssh-keyscan (inseguro ante MITM)."
+            ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          fi
+
+      - name: Update stack files and deploy
+        if: steps.target.outputs.enabled == 'true'
+        env:
+          HOST: ${{ steps.target.outputs.host }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$DEPLOY_USER@$HOST" "BRANCH='$BRANCH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd ~/snippet-searcher-infra
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          # El .env vive solo en la VM; valores entre comillas simples (ver README)
+          set -a; . ./.env; set +a
+          docker stack deploy -c docker-stack.yml --with-registry-auth snippet-searcher
+
+          echo "Esperando convergencia de los servicios (max ~3 min)..."
+          for _ in $(seq 1 36); do
+            bad=$(docker stack services snippet-searcher --format '{{.Name}} {{.Replicas}}' \
+              | awk '{split($2, r, "/"); if (r[1] != r[2]) print $1 " " $2}')
+            [ -z "$bad" ] && break
+            sleep 5
+          done
+          docker stack services snippet-searcher
+          if [ -n "$bad" ]; then
+            echo "Servicios sin converger:"; echo "$bad"
+            exit 1
+          fi
+          REMOTE
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Ambiente: $TARGET_ENV | deploy habilitado: ${{ steps.target.outputs.enabled || 'false' }}" >> "$GITHUB_STEP_SUMMARY"
