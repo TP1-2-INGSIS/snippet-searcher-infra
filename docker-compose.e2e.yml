@@ -26,6 +26,7 @@ services:
       DB_PASSWORD: "snippets"
       LANGUAGE_SERVICE_URL: "http://language-service:8080"
       PERMISSION_SERVICE_URL: "http://permission-service:8080"
+      AUTH_HEADER_IDENTITY_ENABLED: "true"
     networks:
       - e2e-backend
     depends_on:
@@ -40,7 +41,6 @@ services:
     image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
     environment:
       APP_MODE: "web"
-      QUARKUS_REDIS_HOSTS: "redis://localhost:6379"
     networks:
       - e2e-backend
 
@@ -51,6 +51,7 @@ services:
       DB_URL: "jdbc:postgresql://permissions-db:5432/permissions_db"
       DB_USERNAME: "postgres"
       DB_PASSWORD: "postgres"
+      USERS_PROVIDER: "none"
     networks:
       - e2e-backend
     depends_on:

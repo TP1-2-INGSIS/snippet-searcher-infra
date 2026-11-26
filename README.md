@@ -82,6 +82,25 @@ Para probar todo el entorno en tu máquina local sin necesidad de inicializar un
    * **Frontend:** `http://localhost/`
    * **API de Snippets:** `http://localhost/api/`
 
+### Variables de Auth0
+
+Se definen en `.env` (ver `.env.example`) y las consumen `docker-compose.yml` y `docker-stack.yml`:
+
+| Variable | Servicio | De dónde sale en Auth0 |
+|---|---|---|
+| `AUTH0_ISSUER_URI` | snippet-service | `https://<dominio-del-tenant>/` (con la barra final) |
+| `AUTH0_AUDIENCE` | snippet-service | *Identifier* de la API (APIs > tu API) |
+| `AUTH0_DOMAIN` | permission-service | Dominio del tenant, sin `https://` |
+| `AUTH0_MGMT_CLIENT_ID` / `AUTH0_MGMT_CLIENT_SECRET` | permission-service | Aplicación *Machine-to-Machine* autorizada sobre la Management API con el permiso `read:users` |
+
+Flags fijos (no vienen de `.env`):
+
+* compose/stack: `AUTH_HEADER_IDENTITY_ENABLED=false` (snippet-service exige un JWT válido) y `USERS_PROVIDER=auth0` (permission-service).
+* `docker-compose.e2e.yml`: `AUTH_HEADER_IDENTITY_ENABLED=true` y `USERS_PROVIDER=none`, así el smoke test sigue identificando usuarios con `X-User-Id` sin necesitar Auth0.
+
+> [!WARNING] Language en modo web
+> language-service corre con `APP_MODE=web` (y sin `REDIS_URL`) hasta que el stack tenga Redis. No pasarlo a `worker` o `all` antes de agregar Redis y el servicio `language-worker`.
+
 ---
 
 ### Opción B: Despliegue en Docker Swarm (Producción / VM)

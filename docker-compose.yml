@@ -36,6 +36,9 @@ services:
       DB_PASSWORD: "${SNIPPETS_DB_PASSWORD:-snippets}"
       LANGUAGE_SERVICE_URL: "http://language-service:8080"
       PERMISSION_SERVICE_URL: "http://permission-service:8080"
+      AUTH0_ISSUER_URI: "${AUTH0_ISSUER_URI:-}"
+      AUTH0_AUDIENCE: "${AUTH0_AUDIENCE:-}"
+      AUTH_HEADER_IDENTITY_ENABLED: "false"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
@@ -53,7 +56,6 @@ services:
     container_name: snippet-searcher-language-service
     environment:
       APP_MODE: "web"
-      QUARKUS_REDIS_HOSTS: "redis://localhost:6379"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
@@ -67,6 +69,10 @@ services:
       DB_URL: "jdbc:postgresql://permissions-db:5432/permissions_db"
       DB_USERNAME: "${PERMISSIONS_DB_USER:-postgres}"
       DB_PASSWORD: "${PERMISSIONS_DB_PASSWORD:-postgres}"
+      AUTH0_DOMAIN: "${AUTH0_DOMAIN:-}"
+      AUTH0_MGMT_CLIENT_ID: "${AUTH0_MGMT_CLIENT_ID:-}"
+      AUTH0_MGMT_CLIENT_SECRET: "${AUTH0_MGMT_CLIENT_SECRET:-}"
+      USERS_PROVIDER: "auth0"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
