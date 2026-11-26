@@ -49,6 +49,7 @@ services:
       AUTH0_ISSUER_URI: "${AUTH0_ISSUER_URI:-}"
       AUTH0_AUDIENCE: "${AUTH0_AUDIENCE:-}"
       AUTH_HEADER_IDENTITY_ENABLED: "false"
+      REDIS_URL: "redis://redis:6379"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
@@ -61,11 +62,51 @@ services:
     image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
     environment:
       APP_MODE: "web"
+      REDIS_URL: "redis://redis:6379"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
     deploy:
       replicas: 1
+      restart_policy:
+        condition: any
+
+  language-worker:
+    image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
+    environment:
+      APP_MODE: "worker"
+      REDIS_URL: "redis://redis:6379"
+      # Swarm expande la plantilla al crear cada tarea: worker-1, worker-2, ...
+      REDIS_STREAM_CONSUMER: "worker-{{.Task.Slot}}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
+    networks:
+      - backend
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 768M
+      restart_policy:
+        condition: any
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
       restart_policy:
         condition: any
 
@@ -127,6 +168,7 @@ volumes:
   certbot_www:
   snippets_db_data:
   permissions_db_data:
+  redis_data:
 
 configs:
   error404_page:

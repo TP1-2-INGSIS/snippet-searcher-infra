@@ -39,11 +39,14 @@ services:
       AUTH0_ISSUER_URI: "${AUTH0_ISSUER_URI:-}"
       AUTH0_AUDIENCE: "${AUTH0_AUDIENCE:-}"
       AUTH_HEADER_IDENTITY_ENABLED: "false"
+      REDIS_URL: "redis://redis:6379"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
     networks:
       - backend
     depends_on:
       snippets-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       language-service:
         condition: service_started
@@ -56,7 +59,39 @@ services:
     container_name: snippet-searcher-language-service
     environment:
       APP_MODE: "web"
+      REDIS_URL: "redis://redis:6379"
       NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
+    networks:
+      - backend
+    restart: unless-stopped
+
+  language-worker:
+    image: ${LANGUAGE_SERVICE_IMAGE:-ghcr.io/tp1-2-ingsis/language-service:latest}
+    container_name: snippet-searcher-language-worker
+    environment:
+      APP_MODE: "worker"
+      REDIS_URL: "redis://redis:6379"
+      REDIS_STREAM_CONSUMER: "worker-1"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+      NEW_RELIC_LICENSE_KEY: "${NEW_RELIC_LICENSE_KEY:-}"
+    networks:
+      - backend
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: snippet-searcher-redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data
     networks:
       - backend
     restart: unless-stopped
@@ -126,3 +161,4 @@ volumes:
   certbot_www:
   snippets_db_data:
   permissions_db_data:
+  redis_data:
